@@ -1,0 +1,37 @@
+[package]
+name = "unit-conversion-mcp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+context-server.workspace = true
+context-server-utils.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+unit_conversion_mcp_primitives.workspace = true
+
+[workspace]
+resolver = "3"
+members = ["crates/mcp_primitives"]
+
+[workspace.dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+context-server = { git = "https://github.com/fdionisi/context-server", rev = "efa9f9235f9b48e125bb63f8599fc76406d823d7" }
+context-server-utils = { git = "https://github.com/fdionisi/context-server", rev = "efa9f9235f9b48e125bb63f8599fc76406d823d7" }
+schemars = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.8", features = [
+    "runtime-tokio-rustls",
+    "sqlite",
+    "chrono",
+    "uuid",
+] }
+tokio = { version = "1", features = ["full"] }
+
+# local
+unit_conversion_mcp_primitives = { path = "crates/mcp_primitives" }

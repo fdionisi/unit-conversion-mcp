@@ -1,0 +1,15 @@
+[package]
+name = "unit_conversion_mcp_primitives"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/mcp_primitives.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+context-server.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true

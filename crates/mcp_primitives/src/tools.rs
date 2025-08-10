@@ -31,7 +31,7 @@ impl std::fmt::Display for UnitType {
 }
 
 #[derive(Deserialize, JsonSchema, Serialize)]
-struct UnitConversionParams {
+struct UnitConversionItem {
     #[schemars(description = "The value to convert")]
     value: f64,
     #[schemars(
@@ -42,6 +42,12 @@ struct UnitConversionParams {
         description = "The target unit to convert to (e.g., meters, kilometers, miles, feet, inches, yards, nautical_miles, liters, gallons, kilograms, pounds, celsius, fahrenheit, bytes, bits, pascal, psi, mph, kph, knots, beaufort)"
     )]
     to_unit: String,
+}
+
+#[derive(Deserialize, JsonSchema, Serialize)]
+struct UnitConversionParams {
+    #[schemars(description = "Array of unit conversions to perform")]
+    conversions: Vec<UnitConversionItem>,
 }
 
 pub struct UnitConversion;
@@ -247,6 +253,18 @@ impl UnitConversion {
             )),
         }
     }
+
+    fn convert_single(item: &UnitConversionItem) -> Result<Value> {
+        let (base_value, unit_type) = Self::to_base_unit(item.value, &item.from_unit)?;
+        let result = Self::from_base_unit(base_value, &item.to_unit, unit_type)?;
+
+        Ok(json!({
+            "original": format!("{} {}", item.value, item.from_unit),
+            "converted": format!("{} {}", result, item.to_unit),
+            "value": result,
+            "unit_type": unit_type.to_string()
+        }))
+    }
 }
 
 #[async_trait]
@@ -256,7 +274,7 @@ impl ToolExecutor for UnitConversion {
             Some(args) => args,
             None => {
                 return Ok(vec![ToolContent::Text {
-                    text: "Error: Missing arguments for unit conversion.\n\nTo use this tool, please provide:\n- value: The numeric value to convert (e.g., 10)\n- from_unit: The source unit (e.g., \"meters\", \"pounds\", \"celsius\")\n- to_unit: The target unit (e.g., \"feet\", \"kilograms\", \"fahrenheit\")\n\nExample: {\"value\": 10, \"from_unit\": \"meters\", \"to_unit\": \"feet\"}".to_string(),
+                    text: "Error: Missing arguments for unit conversion.\n\nTo use this tool, please provide:\n- conversions: An array of conversion objects, where each object contains:\n  - value: The numeric value to convert (e.g., 10)\n  - from_unit: The source unit (e.g., \"meters\", \"pounds\", \"celsius\")\n  - to_unit: The target unit (e.g., \"feet\", \"kilograms\", \"fahrenheit\")\n\nExample: {\"conversions\": [{\"value\": 10, \"from_unit\": \"meters\", \"to_unit\": \"feet\"}, {\"value\": 32, \"from_unit\": \"fahrenheit\", \"to_unit\": \"celsius\"}]}".to_string(),
                 }]);
             }
         };
@@ -266,72 +284,101 @@ impl ToolExecutor for UnitConversion {
             Err(error) => {
                 return Ok(vec![ToolContent::Text {
                     text: format!(
-                        "Error: Invalid arguments for unit conversion.\n\nParsing failed with: {}\n\nRequired parameters:\n- value: A number (e.g., 10.5)\n- from_unit: A string specifying the source unit\n- to_unit: A string specifying the target unit\n\nPlease ensure your JSON is properly formatted and includes all required fields.",
+                        "Error: Invalid arguments for unit conversion.\n\nParsing failed with: {}\n\nRequired parameters:\n- conversions: An array of conversion objects\n- Each conversion object must contain:\n  - value: A number (e.g., 10.5)\n  - from_unit: A string specifying the source unit\n  - to_unit: A string specifying the target unit\n\nPlease ensure your JSON is properly formatted and includes all required fields.",
                         error
                     ),
                 }]);
             }
         };
 
-        let (base_value, unit_type) = match Self::to_base_unit(params.value, &params.from_unit) {
-            Ok(result) => result,
-            Err(_) => {
-                return Ok(vec![ToolContent::Text {
-                    text: format!(
-                        "Error: Unrecognized source unit \"{}\".\n\nSupported units by category:\n\nDistance: meters, kilometers, miles, feet, inches, yards, nautical_miles\nVolume: liters, milliliters, gallons, quarts, pints, cups, fluid_ounces\nWeight: kilograms, grams, pounds, ounces, stones\nTemperature: celsius, fahrenheit, kelvin\nDigital: bytes, kilobytes, megabytes, gigabytes, terabytes, bits, kilobits, megabits, gigabits\nPressure: pascal, kilopascal, megapascal, bar, psi, atmosphere, torr, mmhg\nSpeed: meters_per_second, kilometers_per_hour, miles_per_hour, knots, feet_per_second, beaufort\n\nNote: Units are case-insensitive. Try using the full unit name or common abbreviations.",
-                        params.from_unit
-                    ),
-                }]);
-            }
-        };
+        if params.conversions.is_empty() {
+            return Ok(vec![ToolContent::Text {
+                text: "Error: No conversions provided. Please include at least one conversion in the conversions array.".to_string(),
+            }]);
+        }
 
-        let result = match Self::from_base_unit(base_value, &params.to_unit, unit_type) {
-            Ok(result) => result,
-            Err(_) => {
-                return Ok(vec![ToolContent::Text {
-                    text: format!(
-                        "Error: Cannot convert from {} ({}) to \"{}\".\n\nThe target unit \"{}\" is either:\n1. Not supported for {} conversions\n2. From a different unit category\n3. Misspelled\n\nSupported {} units: {}\n\nNote: You can only convert between units of the same type (e.g., distance to distance, weight to weight).",
-                        params.from_unit,
-                        unit_type,
-                        params.to_unit,
-                        params.to_unit,
-                        unit_type,
-                        unit_type,
-                        match unit_type {
-                            UnitType::Distance =>
-                                "meters, kilometers, miles, feet, inches, yards, nautical_miles",
-                            UnitType::Volume =>
-                                "liters, milliliters, gallons, quarts, pints, cups, fluid_ounces",
-                            UnitType::Weight => "kilograms, grams, pounds, ounces, stones",
-                            UnitType::Temperature => "celsius, fahrenheit, kelvin",
-                            UnitType::Digital =>
-                                "bytes, kilobytes, megabytes, gigabytes, terabytes, bits, kilobits, megabits, gigabits",
-                            UnitType::Pressure =>
-                                "pascal, kilopascal, megapascal, bar, psi, atmosphere, torr, mmhg",
-                            UnitType::Speed =>
-                                "meters_per_second, kilometers_per_hour, miles_per_hour, knots, feet_per_second, beaufort",
+        let mut results = Vec::new();
+        let mut errors = Vec::new();
+
+        for (index, item) in params.conversions.iter().enumerate() {
+            match Self::convert_single(item) {
+                Ok(result) => results.push(result),
+                Err(e) => {
+                    let error_msg = if e.to_string().contains("Unsupported unit:") {
+                        if e.to_string().contains(&item.from_unit) {
+                            format!(
+                                "Conversion #{}: Unrecognized source unit \"{}\".\n\nSupported units by category:\n\nDistance: meters, kilometers, miles, feet, inches, yards, nautical_miles\nVolume: liters, milliliters, gallons, quarts, pints, cups, fluid_ounces\nWeight: kilograms, grams, pounds, ounces, stones\nTemperature: celsius, fahrenheit, kelvin\nDigital: bytes, kilobytes, megabytes, gigabytes, terabytes, bits, kilobits, megabits, gigabits\nPressure: pascal, kilopascal, megapascal, bar, psi, atmosphere, torr, mmhg\nSpeed: meters_per_second, kilometers_per_hour, miles_per_hour, knots, feet_per_second, beaufort\n\nNote: Units are case-insensitive. Try using the full unit name or common abbreviations.",
+                                index + 1,
+                                item.from_unit
+                            )
+                        } else {
+                            let (_, unit_type) =
+                                Self::to_base_unit(item.value, &item.from_unit).unwrap();
+                            format!(
+                                "Conversion #{}: Cannot convert from {} ({}) to \"{}\".\n\nThe target unit \"{}\" is either:\n1. Not supported for {} conversions\n2. From a different unit category\n3. Misspelled\n\nSupported {} units: {}\n\nNote: You can only convert between units of the same type (e.g., distance to distance, weight to weight).",
+                                index + 1,
+                                item.from_unit,
+                                unit_type,
+                                item.to_unit,
+                                item.to_unit,
+                                unit_type,
+                                unit_type,
+                                match unit_type {
+                                    UnitType::Distance =>
+                                        "meters, kilometers, miles, feet, inches, yards, nautical_miles",
+                                    UnitType::Volume =>
+                                        "liters, milliliters, gallons, quarts, pints, cups, fluid_ounces",
+                                    UnitType::Weight => "kilograms, grams, pounds, ounces, stones",
+                                    UnitType::Temperature => "celsius, fahrenheit, kelvin",
+                                    UnitType::Digital =>
+                                        "bytes, kilobytes, megabytes, gigabytes, terabytes, bits, kilobits, megabits, gigabits",
+                                    UnitType::Pressure =>
+                                        "pascal, kilopascal, megapascal, bar, psi, atmosphere, torr, mmhg",
+                                    UnitType::Speed =>
+                                        "meters_per_second, kilometers_per_hour, miles_per_hour, knots, feet_per_second, beaufort",
+                                }
+                            )
                         }
-                    ),
-                }]);
+                    } else {
+                        format!("Conversion #{}: {}", index + 1, e)
+                    };
+                    errors.push(error_msg);
+                }
             }
-        };
+        }
 
-        let response_json = json!({
-            "original": format!("{} {}", params.value, params.from_unit),
-            "converted": format!("{} {}", result, params.to_unit),
-            "value": result,
-            "unit_type": unit_type.to_string()
-        });
+        let response = if errors.is_empty() {
+            json!({
+                "results": results,
+                "total_conversions": results.len(),
+                "success": true
+            })
+        } else if results.is_empty() {
+            json!({
+                "errors": errors,
+                "total_conversions": 0,
+                "success": false
+            })
+        } else {
+            json!({
+                "results": results,
+                "errors": errors,
+                "total_conversions": results.len(),
+                "total_errors": errors.len(),
+                "success": true,
+                "partial": true
+            })
+        };
 
         Ok(vec![ToolContent::Text {
-            text: response_json.to_string(),
+            text: response.to_string(),
         }])
     }
 
     fn to_tool(&self) -> Tool {
         Tool {
             name: "unit_conversion".to_string(),
-            description: Some("Convert between different units including distance (meters, kilometers, miles, feet, inches, yards, nautical_miles), volume (liters, milliliters, gallons, quarts, pints, cups, fluid ounces), weight (kilograms, grams, pounds, ounces, stones), temperature (celsius, fahrenheit, kelvin), digital storage (bytes, kilobytes, megabytes, gigabytes, terabytes, bits, kilobits, megabits, gigabits), pressure (pascal, kilopascal, megapascal, bar, psi, atmosphere, torr, mmhg), and speed (meters_per_second, kilometers_per_hour, miles_per_hour, knots, feet_per_second, beaufort)".to_string()),
+            description: Some("Convert between different units including distance (meters, kilometers, miles, feet, inches, yards, nautical_miles), volume (liters, milliliters, gallons, quarts, pints, cups, fluid ounces), weight (kilograms, grams, pounds, ounces, stones), temperature (celsius, fahrenheit, kelvin), digital storage (bytes, kilobytes, megabytes, gigabytes, terabytes, bits, kilobits, megabits, gigabits), pressure (pascal, kilopascal, megapascal, bar, psi, atmosphere, torr, mmhg), and speed (meters_per_second, kilometers_per_hour, miles_per_hour, knots, feet_per_second, beaufort). Accepts an array of conversions to process multiple unit conversions at once.".to_string()),
             input_schema: schema_for!(UnitConversionParams).to_value(),
         }
     }

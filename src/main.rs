@@ -2,7 +2,10 @@ use std::{env, sync::Arc};
 
 use anyhow::Result;
 use context_server::{ContextServer, ContextServerRpcRequest, ContextServerRpcResponse};
-use context_server_utils::tool_registry::ToolRegistry;
+use context_server_utils::{
+    prompt_registry::PromptRegistry, resource_registry::ResourceRegistry,
+    tool_registry::ToolRegistry,
+};
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use unit_conversion_mcp_primitives::tools::UnitConversion;
 
@@ -12,6 +15,10 @@ struct ContextServerState {
 
 impl ContextServerState {
     async fn new() -> Result<Self> {
+        let resource_registry = Arc::new(ResourceRegistry::default());
+
+        let prompt_registry = Arc::new(PromptRegistry::default());
+
         let tool_registry = Arc::new(ToolRegistry::default());
 
         tool_registry.register(Arc::new(UnitConversion));
@@ -20,6 +27,8 @@ impl ContextServerState {
             rpc: ContextServer::builder()
                 .with_server_info((env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
                 .with_tools(tool_registry)
+                .with_resources(resource_registry)
+                .with_prompts(prompt_registry)
                 .build()?,
         })
     }
